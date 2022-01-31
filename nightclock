@@ -1,0 +1,130 @@
+#!/usr/bin/env python
+
+#2022.01.31 v1.00
+
+import pyglet
+import datetime
+import math
+
+"""
+t=datetime.datetime.now()
+print(type(t))
+for n in dir(t):
+    f=getattr(t,n)
+    if callable(f):
+        try:
+            v=f()
+        except TypeError:
+            v="Error: need args"
+            pass
+    else:
+        v=f
+    print( f'{n}={v}  /{type(f)}' )
+import sys
+sys.exit()
+"""
+
+game_window = pyglet.window.Window(fullscreen=True) #1280, 960)
+main_batch = pyglet.graphics.Batch()
+
+@game_window.event
+def on_draw():
+    game_window.clear()
+    main_batch.draw()
+
+@game_window.event
+def on_expose():
+    on_draw()
+
+next_y = (game_window.height)*2//3
+
+time_label = pyglet.text.Label(text='00:00:00',
+    font_size=72, color=(0,128,0,255),
+    x = game_window.width//2,
+    y = next_y,
+    anchor_x='center', batch=main_batch)
+
+big_font_size = 72*(game_window.width-64)/time_label.content_width
+time_label.font_size = big_font_size
+next_y += -32 - time_label.content_height//2
+
+date_label = pyglet.text.Label(text='0000-00-00',
+    font_size=big_font_size//3, color=(0,128,0,255),
+    x=game_window.width//2, y=next_y,
+    anchor_x='center', batch=main_batch)
+
+class Actor:
+    def __init__(self, x=0, y=0):
+        self.x,self.y = x, y
+
+human_size=100
+human_width=human_size/10
+
+class Human(Actor):
+    def setphase(self, phase):
+        phase = phase%360
+        self.phase = phase
+        if phase >= 180:
+            phase = 360-phase
+        phase_radians = math.radians(270-45/2+phase/4)
+        dx = math.cos(phase_radians)*self.dir
+        dy = math.sin(phase_radians)
+        self.leg1.x2 = self.leg1.x+dx*human_size/2
+        self.leg1.y2 = self.leg1.y+dy*human_size/2
+        self.leg2.x2 = self.leg2.x-dx*human_size/2
+        self.leg2.y2 = self.leg2.y+dy*human_size/2
+        self.arm1.x2 = self.arm1.x-dx*human_size*3/8
+        self.arm2.x2 = self.arm2.x+dx*human_size*3/8
+
+    def move(self, dt):
+        dx = self.speed*dt*self.dir
+        if self.body.x > game_window.width + human_size or self.body.x < -human_size:
+            self.dir = -self.dir
+            dx = -dx
+        self.body.x += dx
+        self.body.x2 += dx
+        self.head.x += dx
+        self.leg1.x += dx
+        self.leg2.x += dx
+        self.arm1.x += dx
+        self.arm2.x += dx
+        self.setphase(self.phase + dt*180)
+
+    def update(self, dt):
+        self.move(dt)
+
+    def __init__(self, x=0, y=0, dir=1, speed=50, phase=0, batch=None):
+        super().__init__(x, y)
+        self.dir=dir
+        self.speed=speed
+        self.phase=phase
+        r = human_size//4
+        cbody = (0,128,128)
+        carm = (128,128,0)
+        self.leg1 = pyglet.shapes.Line(x, y-r, x, y-r*3, width=human_width//2, color=carm, batch=batch)
+        self.arm1 = pyglet.shapes.Line(x, y+r, x, y-r/2, width=human_width//2, color=carm, batch=batch)
+        self.body = pyglet.shapes.Line(x, y-r, x, y+r, width=human_width, color=cbody, batch=batch)
+        self.head = pyglet.shapes.Circle(x, y+r+r//2, r//2,
+            color=cbody, batch=batch)
+        self.leg2 = pyglet.shapes.Line(x, y-r, x, y-r*3, width=human_width//2, color=carm, batch=batch)
+        self.arm2 = pyglet.shapes.Line(x, y+r, x, y-r/2, width=human_width//2, color=carm, batch=batch)
+
+human1 = Human(human_size, human_size, batch=main_batch)
+
+#@game_window.event
+#def on_key_press(symbol, mods):
+#    if symbol == key.UP:
+#        human1.move(0, 10)
+#    elif symbol == key.DOWN:
+#        human1.move(0, -10)
+
+def update(dt):
+    t=str(datetime.datetime.now())
+    time_label.text=t[11:19]
+    date_label.text=t[:11]
+    human1.update(dt)
+
+if __name__ == '__main__':
+    update(0)
+    pyglet.clock.schedule_interval(update, 0.05)
+    pyglet.app.run()
