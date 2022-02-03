@@ -1,31 +1,23 @@
 #!/usr/bin/env python
 
+#2022.02.03 v1.01.01
 #2022.01.31 v1.00
 
 import pyglet
+from pyglet.window import key
 import datetime
 import math
 
-"""
-t=datetime.datetime.now()
-print(type(t))
-for n in dir(t):
-    f=getattr(t,n)
-    if callable(f):
-        try:
-            v=f()
-        except TypeError:
-            v="Error: need args"
-            pass
-    else:
-        v=f
-    print( f'{n}={v}  /{type(f)}' )
-import sys
-sys.exit()
-"""
+
 
 game_window = pyglet.window.Window(fullscreen=True) #1280, 960)
 main_batch = pyglet.graphics.Batch()
+plants = pyglet.graphics.Group(order=0)
+actors = pyglet.graphics.Group(order=1)
+clock = pyglet.graphics.Group(order=2)
+
+keyboard = key.KeyStateHandler()
+game_window.push_handlers(keyboard)
 
 @game_window.event
 def on_draw():
@@ -38,93 +30,178 @@ def on_expose():
 
 next_y = (game_window.height)*2//3
 
-time_label = pyglet.text.Label(text='00:00:00',
+time_label = pyglet.text.Label(
+    text='00:00:00',
     font_size=72, color=(0,128,0,255),
     x = game_window.width//2,
     y = next_y,
-    anchor_x='center', batch=main_batch)
+    anchor_x='center', batch=main_batch, group=clock)
 
 big_font_size = 72*(game_window.width-64)/time_label.content_width
 time_label.font_size = big_font_size
+
 next_y += -32 - time_label.content_height//2
 
 date_label = pyglet.text.Label(text='0000-00-00',
     font_size=big_font_size//3, color=(0,128,0,255),
     x=game_window.width//2, y=next_y,
-    anchor_x='center', batch=main_batch)
+    anchor_x='center', batch=main_batch, group=clock)
+
+
 
 class Actor:
+    batch = main_batch
+    group = actors
+    size = 100
+    width = 10
+    body_color = (0,128,128)
+    limb_color = (128,128,0)
+    speed = 50
+
     def __init__(self, x=0, y=0):
         self.x,self.y = x, y
+        self.parts = []
 
-human_size=100
-human_width=human_size/10
+    def delete(self):
+        for p in self.parts:
+            p.delete()
+
+class Human_body:
+    batch = main_batch
+    group = actors
+
+    def __init__(self, x, y, length, width, color):
+        self.__dict__.update( locals() )
+        del self.__dict__["self"]
+        self.part = pyglet.shapes.Line(x, y-length/2, x, y+length/2, width=width,
+            color=color, batch=self.batch, group=self.group)
+
+    def delete(self):
+        self.part.delete()
+
+    def move(self, dx, dy):
+        self.part.x += dx
+        self.part.x2 += dx
+        self.part.y += dy
+        self.part.y2 += dy
+
+class Limbs:
+    batch = main_batch
+    group = actors
+    def __init__(self, x, y, length, width, color):
+        self.__dict__.update( locals() )
+        del self.__dict__["self"]
+        self.limb = []
+        self.angle = 0
+        self.phase = 0
+
+    def delete(self):
+        for i in self.limb:
+            i.delete()
+
+    def add_one(self):
+        new_limb = pyglet.shapes.Line(self.x, self.y,
+            self.x, self.y-self.length, width=self.width,
+            color=self.color, batch=self.batch, group=self.group)
+        self.limb.append(new_limb)
+        return new_limb
+
+    def set_angle(self, angle):
+        self.angle = angle
+        radians = math.radians(270+angle)
+        dx = math.cos(radians)*self.length
+        dy = math.sin(radians)*self.length
+        self.limb[0].x2 = self.limb[0].x+dx
+        self.limb[1].x2 = self.limb[1].x-dx
+        self.limb[1].y2 = self.limb[0].y2 = self.limb[0].y+dy
+
+    def move(self, dx, dy):
+        for i in 0,1:
+            self.limb[i].x += dx
+            self.limb[i].x2 += dx
+            self.limb[i].y += dy
+            self.limb[i].y2 += dy
+
 
 class Human(Actor):
     def setphase(self, phase):
-        phase = phase%360
-        self.phase = phase
+        self.phase = phase = phase%360
         if phase >= 180:
             phase = 360-phase
-        phase_radians = math.radians(270-45/2+phase/4)
-        dx = math.cos(phase_radians)*self.dir
-        dy = math.sin(phase_radians)
-        self.leg1.x2 = self.leg1.x+dx*human_size/2
-        self.leg1.y2 = self.leg1.y+dy*human_size/2
-        self.leg2.x2 = self.leg2.x-dx*human_size/2
-        self.leg2.y2 = self.leg2.y+dy*human_size/2
-        self.arm1.x2 = self.arm1.x-dx*human_size*3/8
-        self.arm2.x2 = self.arm2.x+dx*human_size*3/8
+        phase = phase/4-90/4
+        self.legs.set_angle(phase)
+        self.arms.set_angle(phase)
 
-    def move(self, dt):
+    def move(self, dx, dy):
+        self.body.x += dx
+        self.body.y += dy
+        self.body.x2 += dx
+        self.body.y2 += dy
+        self.head.x += dx
+        self.head.y += dy
+        self.legs.move(dx, dy)
+        self.arms.move(dx, dy)
+
+    def walk(self, dt):
         dx = self.speed*dt*self.dir
-        if self.body.x > game_window.width + human_size or self.body.x < -human_size:
+        far_right = self.body.x > game_window.width + self.size
+        if far_right or self.body.x < -self.size:
             self.dir = -self.dir
             dx = -dx
-        self.body.x += dx
-        self.body.x2 += dx
-        self.head.x += dx
-        self.leg1.x += dx
-        self.leg2.x += dx
-        self.arm1.x += dx
-        self.arm2.x += dx
+        self.move(dx, 0)
         self.setphase(self.phase + dt*180)
 
     def update(self, dt):
-        self.move(dt)
+        self.walk(dt)
 
-    def __init__(self, x=0, y=0, dir=1, speed=50, phase=0, batch=None):
+    def __init__(self, x=0, y=0, dir=1):
         super().__init__(x, y)
         self.dir=dir
-        self.speed=speed
-        self.phase=phase
-        r = human_size//4
-        cbody = (0,128,128)
-        carm = (128,128,0)
-        self.leg1 = pyglet.shapes.Line(x, y-r, x, y-r*3, width=human_width//2, color=carm, batch=batch)
-        self.arm1 = pyglet.shapes.Line(x, y+r, x, y-r/2, width=human_width//2, color=carm, batch=batch)
-        self.body = pyglet.shapes.Line(x, y-r, x, y+r, width=human_width, color=cbody, batch=batch)
+        self.phase=0
+        r = self.size//4
+        a = self.legs = Limbs(x, y-r+self.width/2, 2.5*r,
+            width=self.width/2, color=self.limb_color)
+        b = self.arms = Limbs(x, y+r-self.width/4, 2*r,
+            width=self.width/2, color=self.limb_color)
+        self.parts.extend((a,b))
+        self.arms.add_one()
+        self.legs.add_one()
+        self.body = pyglet.shapes.Line(x, y-r, x, y+r, width=self.width,
+            color=self.body_color, batch=self.batch, group=self.group)
         self.head = pyglet.shapes.Circle(x, y+r+r//2, r//2,
-            color=cbody, batch=batch)
-        self.leg2 = pyglet.shapes.Line(x, y-r, x, y-r*3, width=human_width//2, color=carm, batch=batch)
-        self.arm2 = pyglet.shapes.Line(x, y+r, x, y-r/2, width=human_width//2, color=carm, batch=batch)
+            color=self.body_color, batch=self.batch, group=self.group)
+        self.legs.add_one()
+        self.arms.add_one()
 
-human1 = Human(human_size, human_size, batch=main_batch)
+    def set_pose(self, pose):
+        (self.dir, legs_angle, arms_angle) = pose
+        self.legs.set_angle(legs_angle)
+        self.arms.set_angle(arms_angle)
 
-#@game_window.event
-#def on_key_press(symbol, mods):
-#    if symbol == key.UP:
-#        human1.move(0, 10)
-#    elif symbol == key.DOWN:
-#        human1.move(0, -10)
+    def get_pose(self):
+        return (self.dir, self.legs.angle, self.arms.angle)
+
+    def delete(self):
+        super().delete()
+        self.head.delete()
+        self.body.delete()
+
+human1 = Human(100, 200)
+
+
 
 def update(dt):
     t=str(datetime.datetime.now())
     time_label.text=t[11:19]
     date_label.text=t[:11]
     human1.update(dt)
+    if keyboard[key.UP]:
+        human1.move(0, 10)
+    elif keyboard[key.DOWN]:
+        human1.move(0, -10)
+
 
 if __name__ == '__main__':
     update(0)
-    pyglet.clock.schedule_interval(update, 0.05)
+    pyglet.clock.schedule_interval(update, 1/20)
     pyglet.app.run()
