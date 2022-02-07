@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-#2022.02.03 v1.01.01
+#2022.02.07 v1.01.02
 #2022.01.31 v1.00
 
 import pyglet
@@ -62,6 +62,12 @@ class Actor:
         self.x,self.y = x, y
         self.parts = []
 
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        for p in self.parts:
+            p.move(dx, dy)
+
     def delete(self):
         for p in self.parts:
             p.delete()
@@ -80,10 +86,31 @@ class Human_body:
         self.part.delete()
 
     def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
         self.part.x += dx
         self.part.x2 += dx
         self.part.y += dy
         self.part.y2 += dy
+
+class Head:
+    batch = main_batch
+    group = actors
+
+    def __init__(self, x, y, width, color):
+        self.__dict__.update( locals() )
+        del self.__dict__["self"]
+        self.part = pyglet.shapes.Circle(x, y, width/2,
+            color=color, batch=self.batch, group=self.group)
+
+    def delete(self):
+        self.part.delete()
+
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        self.part.x += dx
+        self.part.y += dy
 
 class Limbs:
     batch = main_batch
@@ -113,10 +140,12 @@ class Limbs:
         dy = math.sin(radians)*self.length
         self.limb[0].x2 = self.limb[0].x+dx
         self.limb[1].x2 = self.limb[1].x-dx
-        self.limb[1].y2 = self.limb[0].y2 = self.limb[0].y+dy
+        self.limb[0].y2 = self.limb[1].y2 = self.limb[0].y+dy
 
     def move(self, dx, dy):
-        for i in 0,1:
+        self.x += dx
+        self.y += dy
+        for i in range(0,len(self.limb)):
             self.limb[i].x += dx
             self.limb[i].x2 += dx
             self.limb[i].y += dy
@@ -132,20 +161,10 @@ class Human(Actor):
         self.legs.set_angle(phase)
         self.arms.set_angle(phase)
 
-    def move(self, dx, dy):
-        self.body.x += dx
-        self.body.y += dy
-        self.body.x2 += dx
-        self.body.y2 += dy
-        self.head.x += dx
-        self.head.y += dy
-        self.legs.move(dx, dy)
-        self.arms.move(dx, dy)
-
     def walk(self, dt):
         dx = self.speed*dt*self.dir
-        far_right = self.body.x > game_window.width + self.size
-        if far_right or self.body.x < -self.size:
+        far_right = self.x > game_window.width + self.size
+        if far_right or self.x < -self.size:
             self.dir = -self.dir
             dx = -dx
         self.move(dx, 0)
@@ -163,13 +182,11 @@ class Human(Actor):
             width=self.width/2, color=self.limb_color)
         b = self.arms = Limbs(x, y+r-self.width/4, 2*r,
             width=self.width/2, color=self.limb_color)
-        self.parts.extend((a,b))
         self.arms.add_one()
         self.legs.add_one()
-        self.body = pyglet.shapes.Line(x, y-r, x, y+r, width=self.width,
-            color=self.body_color, batch=self.batch, group=self.group)
-        self.head = pyglet.shapes.Circle(x, y+r+r//2, r//2,
-            color=self.body_color, batch=self.batch, group=self.group)
+        c = self.body = Human_body(x, y, r*2, self.width, self.body_color)
+        d = self.head = Head(x, y+r+r/2, r, self.body_color)
+        self.parts.extend((a,b,c,d))
         self.legs.add_one()
         self.arms.add_one()
 
@@ -180,11 +197,6 @@ class Human(Actor):
 
     def get_pose(self):
         return (self.dir, self.legs.angle, self.arms.angle)
-
-    def delete(self):
-        super().delete()
-        self.head.delete()
-        self.body.delete()
 
 human1 = Human(100, 200)
 
