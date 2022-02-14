@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-#2022.02.07 v1.01.02
+#2022.02.14 v1.01.03
 #2022.01.31 v1.00
 
 import pyglet
@@ -9,6 +9,8 @@ import datetime
 import math
 
 
+def emptysub(*args,**kwargs): pass
+phasemax = 1000
 
 game_window = pyglet.window.Window(fullscreen=True) #1280, 960)
 main_batch = pyglet.graphics.Batch()
@@ -48,29 +50,6 @@ date_label = pyglet.text.Label(text='0000-00-00',
     anchor_x='center', batch=main_batch, group=clock)
 
 
-
-class Actor:
-    batch = main_batch
-    group = actors
-    size = 100
-    width = 10
-    body_color = (0,128,128)
-    limb_color = (128,128,0)
-    speed = 50
-
-    def __init__(self, x=0, y=0):
-        self.x,self.y = x, y
-        self.parts = []
-
-    def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
-        for p in self.parts:
-            p.move(dx, dy)
-
-    def delete(self):
-        for p in self.parts:
-            p.delete()
 
 class Human_body:
     batch = main_batch
@@ -112,94 +91,146 @@ class Head:
         self.part.x += dx
         self.part.y += dy
 
-class Limbs:
+class Limb:
     batch = main_batch
     group = actors
     def __init__(self, x, y, length, width, color):
         self.__dict__.update( locals() )
         del self.__dict__["self"]
-        self.limb = []
-        self.angle = 0
-        self.phase = 0
-
-    def delete(self):
-        for i in self.limb:
-            i.delete()
-
-    def add_one(self):
-        new_limb = pyglet.shapes.Line(self.x, self.y,
+        self.part = pyglet.shapes.Line(self.x, self.y,
             self.x, self.y-self.length, width=self.width,
             color=self.color, batch=self.batch, group=self.group)
-        self.limb.append(new_limb)
-        return new_limb
+        self.angle = 0
+
+    def delete(self):
+        self.part.delete()
 
     def set_angle(self, angle):
         self.angle = angle
         radians = math.radians(270+angle)
         dx = math.cos(radians)*self.length
         dy = math.sin(radians)*self.length
-        self.limb[0].x2 = self.limb[0].x+dx
-        self.limb[1].x2 = self.limb[1].x-dx
-        self.limb[0].y2 = self.limb[1].y2 = self.limb[0].y+dy
+        self.part.x2 = self.part.x+dx
+        self.part.y2 = self.part.y+dy
 
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
-        for i in range(0,len(self.limb)):
-            self.limb[i].x += dx
-            self.limb[i].x2 += dx
-            self.limb[i].y += dy
-            self.limb[i].y2 += dy
+        self.part.x += dx
+        self.part.x2 += dx
+        self.part.y += dy
+        self.part.y2 += dy
 
+class Actor:
+    batch = main_batch
+    group = actors
+    size = 100
+    width = 10
+    body_color = (0,128,128)
+    limb_color = (128,128,0)
+    speed = 50
+
+    def __init__(self, x=0, y=0):
+        self.x = x
+        self.y = y
+        self.parts = []
+        self.actions = []
+
+    def delete(self):
+        for p in self.parts:
+            p.delete()
+
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        for p in self.parts:
+            p.move(dx, dy)
+
+    def tag_active(self,tag):
+        for a in self.actions:
+            if tag in a['tags']:
+                return 1
+
+    def try_action(self, tags, prio):
+        bad = []
+        for a in self.actions:
+            for t in a['tags']:
+                if t in tags:
+                    if prio >= a.prio:
+                        bad.append(a)
+                        break
+                    else:
+                        return 0
+        for a in bad:
+            self.actions.remove[a]
+        return 1
+
+    def add_action(self, name, tags, prio=10):
+        if not self.try_action(tags, prio):
+            return None
+        sub = getattr(self,'a_'+name)
+        action = {'name': name, 'sub': sub, 'tags': tags, 'prio': prio, 'phase': 0}
+        self.actions.append(action)
+        return action
+
+    def do_actions(self, dt):
+        for a in self.actions:
+            a['sub'](dt, a)
+
+    def do_walk(self, x):
+        action = self.add_action('walk', ['legs', 'move'], 10)
+        if action:
+            action['destx'] = x
+
+    def a_walk(self, dt, anim):
+        dx = self.speed*dt*self.dir
+        self.move(dx, 0)
+        phase = anim['phase']
+        phasehalf = phasemax // 2
+        angle = phase if phase < phasehalf else phasemax - phase
+        angle = angle*180/4/phasehalf - 90/4
+        for i in range(0,len(self.legs),2):
+            self.legs[i].set_angle(angle)
+        for i in range(1,len(self.legs),2):
+            self.legs[i].set_angle(-angle)
+        if not self.tag_active('arms'):
+            for i in range(0,len(self.arms),2):
+                self.arms[i].set_angle(angle)
+            for i in range(1,len(self.arms),2):
+                self.arms[i].set_angle(-angle)
+        phase += self.speed * dt * phasemax / 100
+        anim['phase'] = phase % phasemax
+
+    def update(self, dt):
+        self.do_actions(dt)
 
 class Human(Actor):
-    def setphase(self, phase):
-        self.phase = phase = phase%360
-        if phase >= 180:
-            phase = 360-phase
-        phase = phase/4-90/4
-        self.legs.set_angle(phase)
-        self.arms.set_angle(phase)
 
-    def walk(self, dt):
-        dx = self.speed*dt*self.dir
+    def update(self, dt):
         far_right = self.x > game_window.width + self.size
         if far_right or self.x < -self.size:
             self.dir = -self.dir
-            dx = -dx
-        self.move(dx, 0)
-        self.setphase(self.phase + dt*180)
-
-    def update(self, dt):
-        self.walk(dt)
+        self.do_actions(dt)
 
     def __init__(self, x=0, y=0, dir=1):
         super().__init__(x, y)
         self.dir=dir
-        self.phase=0
         r = self.size//4
-        a = self.legs = Limbs(x, y-r+self.width/2, 2.5*r,
-            width=self.width/2, color=self.limb_color)
-        b = self.arms = Limbs(x, y+r-self.width/4, 2*r,
-            width=self.width/2, color=self.limb_color)
-        self.arms.add_one()
-        self.legs.add_one()
-        c = self.body = Human_body(x, y, r*2, self.width, self.body_color)
-        d = self.head = Head(x, y+r+r/2, r, self.body_color)
-        self.parts.extend((a,b,c,d))
-        self.legs.add_one()
-        self.arms.add_one()
+        ytop = y+r-self.width/4
+        ybtm = y-r+self.width/2
+        a1 = Limb(x, ytop, 2*r, width=self.width/2, color=self.limb_color)
+        l1 = Limb(x, ybtm, r*10//4, width=self.width/2, color=self.limb_color)
+        b = self.body = Human_body(x, y, r*2, self.width, self.body_color)
+        h = self.head = Head(x, y+r+r//2, r, self.body_color)
+        l2 = Limb(x, ybtm, 2.5*r, width=self.width/2, color=self.limb_color)
+        a2 = Limb(x, ytop, 2*r, width=self.width/2, color=self.limb_color)
+        self.legs = [l1,l2]
+        self.arms = [a1,a2]
+        self.parts.extend((b,h,l1,l2,a1,a2))
 
-    def set_pose(self, pose):
-        (self.dir, legs_angle, arms_angle) = pose
-        self.legs.set_angle(legs_angle)
-        self.arms.set_angle(arms_angle)
-
-    def get_pose(self):
-        return (self.dir, self.legs.angle, self.arms.angle)
 
 human1 = Human(100, 200)
-
+human1.do_walk(1000)
 
 
 def update(dt):
