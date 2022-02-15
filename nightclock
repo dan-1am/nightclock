@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 
-#2022.02.14 v1.01.03
+#2022.02.15 v1.02.00
 #2022.01.31 v1.00
 
 import pyglet
 from pyglet.window import key
 import datetime
 import math
+import random
 
 
 def emptysub(*args,**kwargs): pass
@@ -113,6 +114,17 @@ class Limb:
         self.part.x2 = self.part.x+dx
         self.part.y2 = self.part.y+dy
 
+    def align(self, goal, step):
+        done = False
+        a = self.angle
+        sign = 1 if self.angle < goal else -1
+        a += step*sign
+        if (goal-a)*sign < 0:
+            a = goal
+            done = True
+        self.set_angle(a)
+        return done
+
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
@@ -128,7 +140,7 @@ class Actor:
     width = 10
     body_color = (0,128,128)
     limb_color = (128,128,0)
-    speed = 50
+    speedmax = 50
 
     def __init__(self, x=0, y=0):
         self.x = x
@@ -151,7 +163,7 @@ class Actor:
             if tag in a['tags']:
                 return 1
 
-    def try_action(self, tags, prio):
+    def block_actions(self, tags, prio):
         bad = []
         for a in self.actions:
             for t in a['tags']:
@@ -166,51 +178,93 @@ class Actor:
         return 1
 
     def add_action(self, name, tags, prio=10):
-        if not self.try_action(tags, prio):
+        if not self.block_actions(tags, prio):
             return None
         sub = getattr(self,'a_'+name)
         action = {'name': name, 'sub': sub, 'tags': tags, 'prio': prio, 'phase': 0}
         self.actions.append(action)
         return action
 
+    def end_action(self, action):
+        if action in self.actions:
+            self.actions.remove(action)
+
     def do_actions(self, dt):
         for a in self.actions:
             a['sub'](dt, a)
 
+    def do_stop(self):
+        action = self.add_action('stop', ['move','legs'], 10)
+        if action:
+            self.speed = self.speedmax
+
+    def a_stop(self, dt, action):
+        da = 100*self.speed/self.size*dt
+        done = True
+        for l in self.legs:
+            done = l.align(0, da) and done
+        if not self.tag_active('arms'):
+            for l in self.arms:
+                done = l.align(0, da) and done
+        if done:
+            self.end_action(action)
+
     def do_walk(self, x):
-        action = self.add_action('walk', ['legs', 'move'], 10)
+        action = self.add_action('walk', ['move', 'legs'], 10)
         if action:
             action['destx'] = x
+            if (x-self.x)*self.dir < 0:
+                self.dir = -self.dir
+            self.speed = self.speedmax
 
-    def a_walk(self, dt, anim):
+    def limbs_angle(self, limbs, angle):
+        for i in range(0,len(limbs),2):
+            limbs[i].set_angle(angle)
+        for i in range(1,len(limbs),2):
+            limbs[i].set_angle(-angle)
+
+    def a_walk(self, dt, action):
         dx = self.speed*dt*self.dir
+        if (action['destx']-self.x-dx)*self.dir < 0:
+            dx = action['destx']-self.x
+            self.move(dx, 0)
+            self.end_action(action)
+            self.do_stop()
+            return
         self.move(dx, 0)
-        phase = anim['phase']
+        phase = action['phase']
         phasehalf = phasemax // 2
         angle = phase if phase < phasehalf else phasemax - phase
         angle = angle*180/4/phasehalf - 90/4
-        for i in range(0,len(self.legs),2):
-            self.legs[i].set_angle(angle)
-        for i in range(1,len(self.legs),2):
-            self.legs[i].set_angle(-angle)
+        self.limbs_angle(self.legs, angle)
         if not self.tag_active('arms'):
-            for i in range(0,len(self.arms),2):
-                self.arms[i].set_angle(angle)
-            for i in range(1,len(self.arms),2):
-                self.arms[i].set_angle(-angle)
+            self.limbs_angle(self.arms, angle)
         phase += self.speed * dt * phasemax / 100
-        anim['phase'] = phase % phasemax
+        action['phase'] = phase % phasemax
+
+    def do_promenade(self):
+        action = self.add_action('promenade', ['goal'], 100)
+        if action:
+            action['now'] = None
+
+    def a_promenade(self, dt, action):
+        if action['now'] == 'idle':
+            action['duration'] -= dt
+            if action['duration'] <= 0 and not self.tag_active('move'):
+                action['now'] = 'move'
+                x = random.uniform(0, game_window.width)
+                self.do_walk(x)
+        elif action['now'] == 'move':
+            if not self.tag_active('move'):
+                action['now'] = ''
+        else:
+            action['now'] = 'idle'
+            action['duration'] = random.uniform(2, 5)
 
     def update(self, dt):
         self.do_actions(dt)
 
 class Human(Actor):
-
-    def update(self, dt):
-        far_right = self.x > game_window.width + self.size
-        if far_right or self.x < -self.size:
-            self.dir = -self.dir
-        self.do_actions(dt)
 
     def __init__(self, x=0, y=0, dir=1):
         super().__init__(x, y)
@@ -230,7 +284,7 @@ class Human(Actor):
 
 
 human1 = Human(100, 200)
-human1.do_walk(1000)
+human1.do_promenade()
 
 
 def update(dt):
