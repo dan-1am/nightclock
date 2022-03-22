@@ -1,204 +1,311 @@
 #!/usr/bin/env python
 
-# 2022.02.16 v1.03.00
+# 2022.03.22 v1.04.00 last for pyglet v1
 # 2022.01.31 v1.00
 
 # todo:
 # watering (Plant.water)
 
-import pyglet
-from pyglet.window import key
 import datetime
 import math
 import random
 
+import pyglet
+from pyglet.window import key
+import pyglet.media
 
-def emptysub(*args,**kwargs): pass
-phasemax = 1000
 
-game_window = pyglet.window.Window(fullscreen=True) #1280, 960)
-main_batch = pyglet.graphics.Batch()
+
+#@window1.event
+#def on_draw():
+
+class WindowMain(pyglet.window.Window):
+    def __init__(self):
+        display = pyglet.canvas.get_display()
+        screen = display.get_default_screen()
+        super().__init__(width=screen.width, height=screen.height, style=pyglet.window.Window.WINDOW_STYLE_BORDERLESS)
+        self.set_location(0,0)
+        self.keys = key.KeyStateHandler()
+        self.push_handlers(self.keys)
+
+    def on_draw(self):
+        self.clear()
+        batch1.draw()
+
+    def on_expose(self):
+        self.on_draw()
+
+    def on_mouse_press(self, x, y, buttons, mods):
+        if buttons & pyglet.window.mouse.LEFT:
+            for b in gui_buttons:
+                if b.inside(x, y):
+                    b.press()
+
+
+window1 = WindowMain()
+
+batch1 = pyglet.graphics.Batch()
 plants_plane = pyglet.graphics.Group(order=0)
 actors_plane = pyglet.graphics.Group(order=1)
 clock_plane = pyglet.graphics.Group(order=2)
 
-keyboard = key.KeyStateHandler()
-game_window.push_handlers(keyboard)
 
-@game_window.event
-def on_draw():
-    game_window.clear()
-    main_batch.draw()
+def add_rain():
+    music_bg = pyglet.media.SourceGroup()
+    n = round(4*3600/music_rain.duration)
+    for i in range(n):
+        music_bg.add(music_rain)
+    player_bg.play()
+    player_bg.queue(music_bg)
 
-@game_window.event
-def on_expose():
-    on_draw()
 
-next_y = (game_window.height)*2//3
+player_bg = pyglet.media.Player()
+music_rain = pyglet.media.load('/home/oda/RainyMood_short2.ogg', streaming=False)
+#music_rain = pyglet.media.load('/home/oda/1.ogg', streaming=False)
+player_bg.push_handlers(on_player_eos=add_rain)
+
+
+def toggle_rain():
+    if player_bg.playing:
+        player_bg.pause()
+    else:
+        if not player_bg.source:
+            add_rain()
+        player_bg.play()
+
+
+class RoundButton:
+    width = 30
+    coloroff = (64, 64, 64)
+    coloron = (128, 128, 0)
+
+    def __init__(self, x, y, sub, on=False):
+        self.x = x
+        self.y = y
+        self.sub = sub
+        self.on = on
+        color = self.coloron if on else self.coloroff
+        self.parts = [
+            pyglet.shapes.Circle(x, y, self.width/2, color=color, batch=batch1),
+        ]
+
+    def inside(self, x, y):
+        return (x-self.x)**2 + (y-self.y)**2 <= (self.width/2)**2
+
+    def enable(self, on=True):
+        self.on = on
+        self.parts[0].color = self.coloron if on else self.coloroff
+
+    def toggle(self):
+        self.enable(not self.on)
+
+    def press(self):
+        self.toggle()
+        self.sub()
+
+
+class RainButton(RoundButton):
+    color = (0, 0, 128)
+    def __init__(self, *ar, **kw):
+        super().__init__(*ar, sub=toggle_rain, **kw)
+        dx = 1
+        dy = 4
+        r = self.width*0.2
+        x1 = self.x-r
+        y = self.y+r/2
+        x2 = self.x+r
+        y3 = self.y-r
+        kw = dict(width=2, color=self.color, batch=batch1)
+        self.parts.extend((
+            pyglet.shapes.Line(x1-dx, y+dy, x1+dx, y-dy, **kw),
+            pyglet.shapes.Line(x2-dx, y+dy, x2+dx, y-dy, **kw),
+            pyglet.shapes.Line(self.x-dx, y3+dy, self.x+dx, y3-dy, **kw),
+        ))
+
+
+gui_buttons = [RainButton(1000, 900)]
+
+next_y = (window1.height)*2//3
 
 time_label = pyglet.text.Label(
     text='00:00:00',
     font_size=72, color=(0,128,0,255),
-    x = game_window.width//2,
+    x = window1.width//2,
     y = next_y,
-    anchor_x='center', batch=main_batch, group=clock_plane)
+    anchor_x='center', batch=batch1, group=clock_plane)
 
-big_font_size = 72*(game_window.width-64)/time_label.content_width
+big_font_size = 72*(window1.width*3//4)/time_label.content_width
 time_label.font_size = big_font_size
 
 next_y += -32 - time_label.content_height//2
 
 date_label = pyglet.text.Label(text='0000-00-00',
     font_size=big_font_size//3, color=(0,128,0,255),
-    x=game_window.width//2, y=next_y,
-    anchor_x='center', batch=main_batch, group=clock_plane)
+    x=window1.width//2, y=next_y,
+    anchor_x='center', batch=batch1, group=clock_plane)
 
 
 
-class Plant:
-    batch = main_batch
-    group = plants_plane
-    def __init__(self, x, y, height=0):
-        self.__dict__.update( locals() )
-        del self.__dict__['self']
+class Movable:
+    group = actors_plane
+
+    def __init__(self, x, y, *ar, **kw):
+        self.x = x
+        self.y = y
         self.parts = []
+        super().__init__(*ar,**kw)
+
+    def delete(self):
+        for p in self.parts:
+            p.delete()
+
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        for p in self.parts:
+            if hasattr(p, 'move'):
+                p.move(dx, dy)
+            else:
+                p.x += dx
+                p.y += dy
+                if hasattr(p, 'x2'):
+                    p.x2 += dx
+                    p.y2 += dy
+
+    def moveto(self, x, y):
+        self.move(x-self.x, y-self.y)
+
+
+class Plant(Movable):
+    group = plants_plane
+
+    def __init__(self, x, y, height=0, *ar, **kw):
+        super().__init__(x, y, *ar, **kw)
+        self.height = height
         self.dead = False
         self.age = 0
         self.max_age = random.uniform(self.max_age*0.7, self.max_age*1.4)
         self.water = 0  #!!! implement watering
         self.need_water()
         self.stem = pyglet.shapes.Line(x, y, x, y+height, width=self.width,
-            color=self.stemcolor, batch=self.batch, group=self.group)
-
-    def delete(self):
-        self.stem.delete()
-        for i in self.parts:
-            i.delete()
+            color=self.stemcolor, batch=batch1, group=self.group)
+        self.parts.append(self.stem)
 
     def need_water(self):
         self.need = random.uniform(5,20)
 
-class Flower(Plant):
-    max_height = 20
-    width = 2
-    stemcolor = (0, 128, 0)
+
+class Flower(Movable):
+    group = plants_plane
     centercolor = (255, 255, 0)
     leafcolor = (128, 128, 128)
     leaves_count = 7
-    max_age = 600
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.blooming = False
 
-    def bloom(self):
+    def __init__(self, x, y, size, *ar, **kw):
+        super().__init__(x, y, *ar, **kw)
+        self.size = size
+        self.dead = False
         x = self.x
-        y = self.y+self.height
-        w = self.width
+        y = self.y
+        w = self.size
         for i in range(self.leaves_count):
             angle = math.radians( 360*i//self.leaves_count )
-            dx = self.width*4*math.cos(angle)
-            dy = self.width*4*math.sin(angle)
-            l = pyglet.shapes.Line(x, y, x+dx, y+dy, width=self.width*2,
-                color=self.leafcolor, batch=self.batch, group=self.group)
+            dx = self.size*4*math.cos(angle)
+            dy = self.size*4*math.sin(angle)
+            l = pyglet.shapes.Line(x, y, x+dx, y+dy, width=self.size*2,
+                color=self.leafcolor, batch=batch1, group=self.group)
             self.parts.append(l)
         self.parts.append( pyglet.shapes.Circle(x, y, w*2,
-            color=self.centercolor, batch=self.batch, group=self.group) )
-        self.blooming = True
-
-    def grow(self, dt):
-        self.need -= dt
-        if self.need < 0:
-            self.stem.y2 += 1
-            for l in self.parts:
-                l.y += 1
-                if hasattr(l, 'y2'):
-                    l.y2 += 1
-            self.height += 1
-            if(not self.blooming and self.height >= self.max_height//2):
-                self.bloom()
-            self.need_water()
+            color=self.centercolor, batch=batch1, group=self.group) )
 
     def wither(self):
         if self.parts:
             if len(self.parts) == 1:
                 i = 0
             else:
-                i = random.randint(0, len(self.parts)-1)
+                i = random.randint(0, len(self.parts)-2)
             self.parts[i].delete()
             del(self.parts[i])
-            self.max_age += random.uniform(self.max_age*0.03, self.max_age*0.06)
         else:
-            self.stem.delete()
+            self.dead = True
+        return self.dead
+
+
+class FlowerPlant(Plant):
+    max_height = 20
+    width = 2
+    stemcolor = (0, 128, 0)
+    max_age = 600
+
+    def __init__(self, *ar, **kw):
+        super().__init__(*ar, **kw)
+        self.flower = None
+        self.dead = False
+
+    def bloom(self):
+        self.flower = Flower(self.x, self.y + self.height, self.width)
+        self.parts.append(self.flower)
+
+    def grow(self, dt):
+        self.need -= dt
+        if self.need < 0:
+            self.stem.y2 += 1
+            for l in (i for i in self.parts if i is not self.stem):
+                l.move(0, 1)
+            self.height += 1
+            if(not self.flower and self.height >= self.max_height//2):
+                self.bloom()
+            self.need_water()
+
+    def wither(self, dt):
+        self.max_age += random.uniform(self.max_age*0.03, self.max_age*0.06)
+        if self.flower.wither():
             self.dead = True
 
     def update(self, dt):
         self.age += dt
         if self.age > self.max_age:
-            self.wither()
+            self.wither(dt)
         elif self.height < self.max_height:
             self.grow(dt)
 
-class Human_body:
-    batch = main_batch
-    group = actors_plane
 
-    def __init__(self, x, y, length, width, color):
-        self.__dict__.update( locals() )
-        del self.__dict__['self']
-        self.part = pyglet.shapes.Line(x, y-length/2, x, y+length/2, width=width,
-            color=color, batch=self.batch, group=self.group)
+class Head(Movable):
+    def __init__(self, x, y, width, color, *ar, **kw):
+        super().__init__(x, y, *ar, **kw)
+        self.width = width
+        self.color = color
+        i = pyglet.shapes.Circle(x, y, width/2,
+            color=color, batch=batch1, group=self.group)
+        self.parts.append(i)
 
-    def delete(self):
-        self.part.delete()
 
-    def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
-        self.part.x += dx
-        self.part.x2 += dx
-        self.part.y += dy
-        self.part.y2 += dy
-
-class Head:
-    batch = main_batch
-    group = actors_plane
-
-    def __init__(self, x, y, width, color):
-        self.__dict__.update( locals() )
-        del self.__dict__['self']
-        self.part = pyglet.shapes.Circle(x, y, width/2,
-            color=color, batch=self.batch, group=self.group)
-
-    def delete(self):
-        self.part.delete()
-
-    def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
-        self.part.x += dx
-        self.part.y += dy
-
-class Limb:
-    batch = main_batch
-    group = actors_plane
-    def __init__(self, x, y, length, width, color):
-        self.__dict__.update( locals() )
-        del self.__dict__['self']
-        self.part = pyglet.shapes.Line(self.x, self.y,
-            self.x, self.y-self.length, width=self.width,
-            color=self.color, batch=self.batch, group=self.group)
+class Limb(Movable):
+    def __init__(self, x, y, size, width, color, *ar, **kw):
+        super().__init__(x, y, *ar, **kw)
+        self.size = size
+        self.width = width
+        self.color = color
+        self.holding = []
+        i = pyglet.shapes.Line(self.x, self.y,
+            self.x, self.y-self.size, width=self.width,
+            color=self.color, batch=batch1, group=self.group)
+        self.parts.append(i)
         self.angle = 0
 
-    def delete(self):
-        self.part.delete()
+    def end(self):
+        return (self.parts[0].x2, self.parts[0].y2)
 
     def set_angle(self, angle):
         self.angle = angle
         radians = math.radians(270+angle)
-        dx = math.cos(radians)*self.length
-        dy = math.sin(radians)*self.length
-        self.part.x2 = self.part.x+dx
-        self.part.y2 = self.part.y+dy
+        dx = math.cos(radians)*self.size
+        dy = math.sin(radians)*self.size
+        l = self.parts[0]
+        l.x2 = l.x+dx
+        l.y2 = l.y+dy
+        for i in self.holding:
+            i.moveto(*self.end())
 
     def align(self, goal, step):
         done = False
@@ -211,42 +318,29 @@ class Limb:
         self.set_angle(a)
         return done
 
-    def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
-        self.part.x += dx
-        self.part.x2 += dx
-        self.part.y += dy
-        self.part.y2 += dy
+    def hold(self, tool):
+        self.parts.append(tool)
+        self.holding.append(tool)
+        tool.moveto(*self.end())
 
+
+class HumanBody(Movable):
+    def __init__(self, x, y, size, width, color, *ar, **kw):
+        super().__init__(x, y, *ar, **kw)
+        self.size = size
+        i = pyglet.shapes.Line(x, y-size/2, x, y+size/2, width=width,
+            color=color, batch=batch1, group=self.group)
+        self.parts.append(i)
 
 
 class Actor:
-    batch = main_batch
-    group = actors_plane
-    size = 100
-    width = 10
-    body_color = (0,128,128)
-    limb_color = (128,128,0)
-    speedmax = 50
+    phasemax = 1000
 
-    def __init__(self, x=0, y=0):
-        self.x = x
-        self.y = y
-        self.parts = []
+    def __init__(self, *ar, **kw):
         self.actions = []
+        super().__init__(*ar, **kw)
 
-    def delete(self):
-        for p in self.parts:
-            p.delete()
-
-    def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
-        for p in self.parts:
-            p.move(dx, dy)
-
-    def tag_active(self,tag):
+    def tag_active(self, tag):
         for a in self.actions:
             if tag in a['tags']:
                 return 1
@@ -281,6 +375,11 @@ class Actor:
         for a in self.actions:
             a['sub'](dt, a)
 
+    def update(self, dt):
+        self.do_actions(dt)
+
+
+class Walker(Actor):
     def do_stop(self):
         action = self.add_action('stop', ['move','legs'], 10)
         if action:
@@ -321,14 +420,14 @@ class Actor:
             return
         self.move(dx, 0)
         phase = action['phase']
-        phasehalf = phasemax // 2
-        angle = phase if phase < phasehalf else phasemax - phase
+        phasehalf = self.phasemax // 2
+        angle = phase if phase < phasehalf else self.phasemax - phase
         angle = angle*180/4/phasehalf - 90/4
         self.limbs_angle(self.legs, angle)
         if not self.tag_active('arms'):
             self.limbs_angle(self.arms, angle)
-        phase += self.speed * dt * phasemax / 100
-        action['phase'] = phase % phasemax
+        phase += self.speed * dt * self.phasemax / 100
+        action['phase'] = phase % self.phasemax
 
     def do_promenade(self):
         action = self.add_action('promenade', ['goal'], 100)
@@ -340,7 +439,7 @@ class Actor:
             action['duration'] -= dt
             if action['duration'] <= 0 and not self.tag_active('move'):
                 action['now'] = 'move'
-                x = random.uniform(0, game_window.width)
+                x = random.uniform(0, window1.width)
                 self.do_walk(x)
         elif action['now'] == 'move':
             if not self.tag_active('move'):
@@ -349,62 +448,102 @@ class Actor:
             action['now'] = 'idle'
             action['duration'] = random.uniform(2, 5)
 
-    def update(self, dt):
-        self.do_actions(dt)
 
-class Human(Actor):
+class PoleTool(Movable):
+    width = 4
+    size = 120
+    color = (150, 50, 0)
+
+    def __init__(self, x, y, size=None, hold=50, angle=0, *ar, **kw):
+        super().__init__(x, y, *ar, **kw)
+        self.size = self.size if size is None else size
+        self.hold = hold
+        self.angle = angle
+        p = pyglet.shapes.Line(*self.coords(), width=self.width,
+            color=self.color, batch=batch1, group=self.group)
+        self.parts.append(p)
+
+    def coords(self):
+        radians = math.radians(self.angle)
+        dx = math.cos(radians)
+        dy = math.sin(radians)
+        l1 = self.size*self.hold/100
+        l2 = self.size-l1
+        return (self.x-dx*l1, self.y-dy*l1, self.x+dx*l2, self.y+dy*l2)
+
+
+class Human(Movable,Walker):
+    group = actors_plane
+    size_base = 150
+    size = size_base
+    width = 10
+    body_size = size*30/82
+    arms_shift = body_size/20
+    legs_shift = body_size/10
+    arms_size = body_size
+    legs_size = size*40/82+legs_shift
+    head_size = size*12/82
+    body_color = (0,128,128)
+    limb_color = (128,128,0)
+    speedmax = 50
 
     def __init__(self, x=0, y=0, dir=1):
         super().__init__(x, y)
         self.dir=dir
-        r = self.size/4
         ya = self.arms_level()
         yl = self.legs_level()
-        a1 = Limb(x, ya, 2*r, width=self.width/2, color=self.limb_color)
-        l1 = Limb(x, yl, r*10//4, width=self.width/2, color=self.limb_color)
-        b = self.body = Human_body(x, y, r*2, self.width, self.body_color)
-        h = self.head = Head(x, y+r+r//2, r, self.body_color)
-        l2 = Limb(x, yl, 2.5*r, width=self.width/2, color=self.limb_color)
-        a2 = Limb(x, ya, 2*r, width=self.width/2, color=self.limb_color)
+        a1 = Limb(x, ya, self.arms_size, width=self.width/2, color=self.limb_color)
+        l1 = Limb(x, yl, self.legs_size, width=self.width/2, color=self.limb_color)
+        b = self.body = HumanBody(x, y, self.body_size, self.width, self.body_color)
+        h = self.head = Head(x, y+(self.body_size+self.head_size)/2, self.head_size, self.body_color)
+        l2 = Limb(x, yl, self.legs_size, width=self.width/2, color=self.limb_color)
+        a2 = Limb(x, ya, self.arms_size, width=self.width/2, color=self.limb_color)
         self.legs = [l1,l2]
         self.arms = [a1,a2]
         self.parts.extend((b,h,l1,l2,a1,a2))
 
+#!!! todo resize
+    def resize(self, size=None, scale=1):
+        ground = self.ground()
+        if size is None:
+            size = self.size_base*scale
+        else:
+            scale = size/self.size_base
+        self.size = size
+
     def arms_level(self):
-        return self.y + self.size/4 - self.width/4
+        return self.y + self.body_size/2 - self.arms_shift
 
     def legs_level(self):
-        return self.y - self.size/4 + self.width/2
+        return self.y - self.body_size/2 + self.legs_shift
 
     def ground(self):
-        return self.legs_level() - self.legs[0].length
+        return self.legs_level() - self.legs_size
 
 
-
-class Field:
-    def __init__(self, y):
-        self.y = y
-        self.plants = []
+class Field(Movable):
+    def __init__(self, y, *ar, **kw):
+        super().__init__(0, y, *ar, **kw)
         self.wait_next()
 
     def wait_next(self):
         self.wait = random.uniform(30, 60)
 
     def grow(self):
-        x = random.randint(30, game_window.width-30)
-        for p in self.plants:
+        x = random.randint(30, window1.width-30)
+        for p in self.parts:
             if abs(p.x-x) < 10:
                 return
-        self.plants.append( Flower(x, self.y, 0) )
+        self.parts.append( FlowerPlant(x, self.y, 0) )
 
     def update(self, dt):
         dead = []
-        for i in self.plants:
+        for i in self.parts:
             i.update(dt)
             if i.dead:
                 dead.append(i)
         for i in dead:
-            self.plants.remove(i)
+            self.parts.remove(i)
         self.wait -= dt
         if self.wait < 0:
             self.grow()
@@ -415,17 +554,22 @@ class Field:
 human1 = Human(100, 200)
 human1.do_promenade()
 flowers = Field(human1.ground() + 10)
+pole1 = PoleTool(100, 100, angle=70)
+human1.arms[1].hold(pole1)
 
 def update(dt):
     t=str(datetime.datetime.now())
     time_label.text=t[11:19]
     date_label.text=t[:11]
     human1.update(dt)
+    dt *= 20    #debug!!!
     flowers.update(dt)
-    if keyboard[key.UP]:
+    if window1.keys[key.UP]:
         human1.move(0, 10)
-    elif keyboard[key.DOWN]:
+        flowers.move(0,10)
+    elif window1.keys[key.DOWN]:
         human1.move(0, -10)
+        flowers.move(0,-10)
 
 
 if __name__ == '__main__':
